@@ -1,6 +1,6 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, BadRequestException, InternalServerErrorException } from '@nestjs/common';
 import { PassportStrategy } from '@nestjs/passport';
-import { Strategy, VerifyCallback } from 'passport-google-oauth20';
+import { Strategy } from 'passport-google-oauth20';
 import { AuthService } from './auth.service';
 
 @Injectable()
@@ -14,32 +14,27 @@ export class GoogleStrategy extends PassportStrategy(Strategy, 'google') {
     });
   }
 
-  // profile contains user info returned by Google
-  async validate(
-    accessToken: string,
-    refreshToken: string,
-    profile: any,
-    done: VerifyCallback,
-  ) {
+  async validate(accessToken: string, refreshToken: string, profile: any) {
     try {
-      const email = profile.emails?.[0]?.value;
-      const googleId = profile.id;
-      const name = profile.displayName;
-      const avatar = profile.photos?.[0]?.value;
+      const email = profile.emails?.[0]?.value ?? null;
+      if (!email) {
+        throw new BadRequestException('No email returned from Google');
+      }
 
-      // find or create user in DB
-      const user = await this.authService.findOrCreateOAuthUser({
+      const googleId = profile.id;
+      const name = profile.displayName ?? profile.name?.givenName ?? 'No Name';
+      const avatar = profile.photos?.[0]?.value ?? null;
+
+      return this.authService.findOrCreateOAuthUser({
         provider: 'google',
         providerId: googleId,
         email,
         name,
         avatar,
       });
-
-      // return user (Passport will attach to request)
-      done(null, user);
     } catch (err) {
-      done(err, false);
+      if (err instanceof BadRequestException) throw err;
+      throw new InternalServerErrorException('Google OAuth failed');
     }
   }
 }

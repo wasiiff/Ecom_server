@@ -17,15 +17,15 @@ export class User {
   @Prop({ required: true, unique: true })
   email: string;
 
-  @Prop({ required: true })
-  password: string;
+  // ← Make password optional and default to null so OAuth users can be saved.
+  @Prop({ type: String, required: false, default: null })
+  password?: string | null;
 
   @Prop({ type: [String], enum: Role, default: [Role.USER] })
   roles: Role[];
 
   @Prop({ default: 0 })
   loyaltyPoints: number;
-
 
   @Prop({ type: String, default: null })
   otp?: string | null;
@@ -38,6 +38,7 @@ export class User {
 
   @Prop({ default: null })
   lastOtpSent?: Date;
+
   @Prop({ type: Boolean, default: false })
   isBlocked: boolean;
 

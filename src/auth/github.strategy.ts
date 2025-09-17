@@ -1,7 +1,18 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, BadRequestException, InternalServerErrorException } from '@nestjs/common';
 import { PassportStrategy } from '@nestjs/passport';
 import { Strategy } from 'passport-github2';
 import { AuthService } from './auth.service';
+
+// If your TS config doesn't include DOM lib, let TS know `fetch` exists.
+// On Node 18+ fetch is global. If you're on Node < 18 install node-fetch instead.
+declare const fetch: any;
+
+interface GithubEmail {
+  email: string;
+  primary: boolean;
+  verified: boolean;
+  visibility?: string | null;
+}
 
 @Injectable()
 export class GithubStrategy extends PassportStrategy(Strategy, 'github') {
@@ -14,25 +25,49 @@ export class GithubStrategy extends PassportStrategy(Strategy, 'github') {
     });
   }
 
-  async validate(accessToken: string, refreshToken: string, profile: any, done: Function) {
+  async validate(accessToken: string, refreshToken: string, profile: any) {
     try {
-      const githubId = profile.id;
-      // Github sometimes returns email in emails array
-      const email = profile.emails?.[0]?.value ?? profile._json?.email;
-      const name = profile.displayName || profile.username;
-      const avatar = profile.photos?.[0]?.value;
+      let email = profile.emails?.[0]?.value ?? profile._json?.email ?? null;
 
-      const user = await this.authService.findOrCreateOAuthUser({
+      // If email missing, fetch from GitHub /user/emails
+      if (!email) {
+        const response = await fetch('https://api.github.com/user/emails', {
+          headers: { Authorization: `token ${accessToken}`, Accept: 'application/vnd.github.v3+json' },
+        });
+
+        if (!response.ok) {
+          throw new BadRequestException('Could not fetch GitHub emails');
+        }
+
+        const emails = (await response.json()) as GithubEmail[];
+
+        if (!Array.isArray(emails) || emails.length === 0) {
+          throw new BadRequestException('No emails returned from GitHub');
+        }
+
+        const primary = emails.find((e) => e.primary && e.verified);
+        email = primary?.email ?? emails[0]?.email ?? null;
+      }
+
+      if (!email) {
+        throw new BadRequestException('No email found from GitHub account');
+      }
+
+      const githubId = profile.id;
+      const name = profile.displayName || profile.username || 'No Name';
+      const avatar = profile.photos?.[0]?.value ?? null;
+
+      return this.authService.findOrCreateOAuthUser({
         provider: 'github',
         providerId: githubId,
         email,
         name,
         avatar,
       });
-
-      done(null, user);
     } catch (err) {
-      done(err, false);
+      // Re-throw Nest-friendly errors or wrap unknown errors
+      if (err instanceof BadRequestException) throw err;
+      throw new InternalServerErrorException('GitHub OAuth failed');
     }
   }
 }
